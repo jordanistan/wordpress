@@ -1,0 +1,54 @@
+---
+- name: Backup WordPress site
+  hosts: wordpress
+  become: yes
+  tasks:
+
+    - name: Create backup directory
+      file:
+        path: /var/backups/wordpress
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Backup WordPress database
+      command: >
+        mysqldump -u {{ db_user }} -p{{ db_password }} {{ db_name }} > /var/backups/wordpress/db_backup_{{ ansible_date_time.date }}.sql
+      environment:
+        MYSQL_PWD: "{{ db_password }}"
+
+    - name: Compress WordPress files
+      archive:
+        path:
+          - /var/www/html
+        dest: /var/backups/wordpress/files_backup_{{ ansible_date_time.date }}.tar.gz
+        format: gz
+
+    - name: Set permissions on backup files
+      file:
+        path: /var/backups/wordpress
+        recurse: yes
+        owner: root
+        group: root
+        mode: '0600'
+
+    - name: Optional: Copy backups to remote storage (e.g., S3)
+      when: backup_to_s3 is defined and backup_to_s3
+      s3:
+        bucket: "{{ s3_bucket_name }}"
+        object: "wordpress_backups/{{ inventory_hostname }}/backup_{{ ansible_date_time.date }}.tar.gz"
+        src: /var/backups/wordpress/files_backup_{{ ansible_date_time.date }}.tar.gz
+        mode: put
+
+    - name: Clean up old backups
+      find:
+        paths: /var/backups/wordpress
+        age: 30d
+      register: old_backups
+
+    - name: Remove old backups
+      file:
+        path: "{{ item.path }}"
+        state: absent
+      with_items: "{{ old_backups.files }}"
