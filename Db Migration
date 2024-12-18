@@ -1,0 +1,68 @@
+---
+- name: Migrate MySQL Database from DigitalOcean to AWS
+  hosts: localhost
+  gather_facts: no
+  tasks:
+
+    - name: Prompt for source database details
+      vars_prompt:
+        - name: src_db_host
+          prompt: "Enter the source DigitalOcean database host"
+          private: no
+        - name: src_db_user
+          prompt: "Enter the source database username"
+          private: no
+        - name: src_db_password
+          prompt: "Enter the source database password"
+          private: yes
+        - name: src_db_name
+          prompt: "Enter the source database name"
+          private: no
+
+    - name: Prompt for destination database details
+      vars_prompt:
+        - name: dest_db_host
+          prompt: "Enter the destination AWS RDS host"
+          private: no
+        - name: dest_db_user
+          prompt: "Enter the destination database username"
+          private: no
+        - name: dest_db_password
+          prompt: "Enter the destination database password"
+          private: yes
+        - name: dest_db_name
+          prompt: "Enter the destination database name"
+          private: no
+
+    - name: Dump the source database
+      command: >
+        mysqldump -h {{ src_db_host }} -u {{ src_db_user }} -p{{ src_db_password }} {{ src_db_name }} > /tmp/{{ src_db_name }}_backup.sql
+      environment:
+        MYSQL_PWD: "{{ src_db_password }}"
+
+    - name: Copy the dump file to destination
+      copy:
+        src: /tmp/{{ src_db_name }}_backup.sql
+        dest: /tmp/{{ src_db_name }}_backup.sql
+
+    - name: Restore the database to AWS RDS
+      command: >
+        mysql -h {{ dest_db_host }} -u {{ dest_db_user }} -p{{ dest_db_password }} {{ dest_db_name }} < /tmp/{{ src_db_name }}_backup.sql
+      environment:
+        MYSQL_PWD: "{{ dest_db_password }}"
+
+    - name: Clean up temporary files
+      file:
+        path: /tmp/{{ src_db_name }}_backup.sql
+        state: absent
+
+    - name: Verify the migration
+      command: >
+        mysql -h {{ dest_db_host }} -u {{ dest_db_user }} -p{{ dest_db_password }} -e "SHOW TABLES" {{ dest_db_name }}
+      environment:
+        MYSQL_PWD: "{{ dest_db_password }}"
+      register: migration_verification
+
+    - name: Display verification results
+      debug:
+        msg: "{{ migration_verification.stdout_lines }}"
